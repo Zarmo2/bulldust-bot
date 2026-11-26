@@ -1,51 +1,105 @@
 import os
 import random
-from collections import Counter
 
-from telegram import (
-    Update,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup
-)
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
-    CallbackQueryHandler,
     MessageHandler,
+    CallbackQueryHandler,
     ContextTypes,
     filters
 )
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+TOKEN = os.getenv("BOT_TOKEN")
 
 WORDS = [
-    "CAT", "DOG", "SUN", "CAR", "BOX",
-    "BAT", "HAT", "CUP", "PEN", "MAP",
-    "BED", "BUS", "COW", "FOX", "PIG",
-    "JAM", "EGG", "SKY", "RED", "FUN"
+    "APPLE", "GRAPE", "MANGO", "BRAIN", "PLANT",
+    "TIGER", "HOUSE", "WATER", "LIGHT", "DREAM",
+    "SMILE", "CHAIR", "MUSIC", "EARTH", "CLOUD",
+    "TRAIN", "STONE", "GREEN", "SWEET", "CROWN",
+    "FLAME", "HEART", "RIVER", "WORLD", "NIGHT",
+    "SPACE", "POWER", "HAPPY", "QUEEN", "SMART",
+    "PEACE", "FAITH", "GHOST", "FRUIT", "MONEY",
+    "GRASS", "BREAD", "SNAKE", "BEACH", "PLANE",
+    "SHEEP", "TOWER", "PLATE", "BRAVE", "CRANE",
+    "SHIRT", "PHONE", "TABLE", "MOUSE", "LEMON",
+    "PEACH", "MELON", "BERRY", "OLIVE", "PILOT",
+    "ROBOT", "LASER", "MAGIC", "NURSE", "JUDGE",
+    "ACTOR", "WRITE", "LEARN", "TEACH", "THINK",
+    "GUESS", "SOLVE", "QUICK", "SHARP", "SOUND",
+    "VOICE", "RADIO", "VIDEO", "PHOTO", "MARCH",
+    "APRIL", "PLUMS", "MONTH", "MORAL", "HONOR",
+    "TRUST", "LOYAL", "ANGEL", "DEVIL", "CLEAN",
+    "FRESH", "SLEEP", "STORM", "CYCLE", "SOUTH",
+    "NORTH", "EASTS", "WESTS", "CANDY", "SUGAR",
+    "HONEY", "CREAM", "SPICE", "BLACK", "WHITE",
+    "BROWN", "DAILY"
 ]
 
+games = {}
 scores = {}
+players = {}
+
 
 def main_menu():
     keyboard = [
-        [InlineKeyboardButton("🎮 Play Game", callback_data="play")],
-        [InlineKeyboardButton("📖 How to Play", callback_data="help")],
-        [InlineKeyboardButton("🏆 Leaderboard", callback_data="leaderboard")],
-        [InlineKeyboardButton("ℹ️ About BullDust", callback_data="about")]
+        [
+            InlineKeyboardButton("🎮 PLAY GAME", callback_data="play"),
+            InlineKeyboardButton("👤 MY SCORE", callback_data="score")
+        ],
+        [
+            InlineKeyboardButton("🏆 LEADERBOARD", callback_data="leaderboard")
+        ],
+        [
+            InlineKeyboardButton("📖 HOW TO PLAY", callback_data="help"),
+            InlineKeyboardButton("ℹ️ ABOUT", callback_data="about")
+        ]
     ]
     return InlineKeyboardMarkup(keyboard)
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["game"] = None
-
     await update.message.reply_text(
-        "🎉 Welcome to BULLDUST!\n\n"
-        "Think fast, guess smart and earn points!\n\n"
-        "Choose an option below:",
+        "🧠 WELCOME TO BRAINBATTLE!\n\n"
+        "Think fast. Play smart. Become a champion!\n\n"
+        "Challenge yourself with exciting word puzzles "
+        "and earn points for every victory.\n\n"
+        "Are you ready to test your brain?",
         reply_markup=main_menu()
     )
+
+
+async def show_leaderboard(message):
+    if not scores:
+        await message.reply_text(
+            "🏆 LEADERBOARD\n\n"
+            "No champions yet!\n"
+            "Play a game and be the first.",
+            reply_markup=main_menu()
+        )
+        return
+
+    ranking = sorted(
+        scores.items(),
+        key=lambda item: item[1],
+        reverse=True
+    )
+
+    result = "🏆 BRAINBATTLE LEADERBOARD\n\n"
+
+    for position, (player_id, score) in enumerate(ranking[:10], 1):
+        name = players.get(player_id, "Player")
+        result += f"{position}. {name}: {score} points\n"
+
+    await message.reply_text(
+        result,
+        reply_markup=main_menu()
+    )
+
+
+async def leaderboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await show_leaderboard(update.message)
 
 
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -53,154 +107,167 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     user_id = query.from_user.id
-    name = query.from_user.first_name
+    players[user_id] = query.from_user.first_name
 
     if query.data == "play":
-        word = random.choice(WORDS)
-
-        context.user_data["game"] = {
-            "word": word,
-            "attempts": 0
+        games[user_id] = {
+            "word": random.choice(WORDS),
+            "attempts": 0,
+            "hint_used": False
         }
 
-        await query.edit_message_text(
-            "🎮 NEW CHALLENGE!\n\n"
-            "I have chosen a secret THREE-LETTER word.\n"
-            "You have 6 attempts to find it.\n\n"
-            "Send your first guess!"
+        await query.message.reply_text(
+            "🎯 NEW CHALLENGE!\n\n"
+            "Discover the mystery five-letter word.\n"
+            "You have ten attempts.\n\n"
+            "🟩 Correct letter and position.\n"
+            "🟨 Correct letter, wrong position.\n"
+            "⬛ Letter not in the word.\n\n"
+            "Enter your five-letter guess!",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("💡 GET A HINT", callback_data="hint")]
+            ])
+        )
+
+    elif query.data == "hint":
+        if user_id not in games:
+            await query.message.reply_text("Start a game first!")
+            return
+
+        game = games[user_id]
+
+        if game["hint_used"]:
+            await query.message.reply_text(
+                "You've already used your hint!"
+            )
+            return
+
+        game["hint_used"] = True
+
+        await query.message.reply_text(
+            f"💡 HINT: The mystery word begins with '{game['word'][0]}'!"
         )
 
     elif query.data == "help":
-        await query.edit_message_text(
-            "📖 HOW TO PLAY BULLDUST\n\n"
-            "1. Tap Play Game.\n"
-            "2. Guess a three-letter word.\n"
-            "3. You have 6 attempts.\n"
-            "4. 🟩 means correct letter and position.\n"
-            "5. 🟨 means correct letter, wrong position.\n"
-            "6. ⬜ means the letter is not in the word.\n\n"
-            "Guess correctly to earn 10 points!",
+        await query.message.reply_text(
+            "📖 HOW TO PLAY BRAINBATTLE\n\n"
+            "1. Press PLAY GAME.\n"
+            "2. Guess the hidden five-letter word.\n"
+            "3. You have ten attempts.\n"
+            "4. Use the coloured clues to guide you.\n"
+            "5. You can use one hint per game.\n"
+            "6. Guess correctly to earn 10 points!\n\n"
+            "Good luck, champion!",
             reply_markup=main_menu()
         )
 
     elif query.data == "about":
-        await query.edit_message_text(
-            "ℹ️ ABOUT BULLDUST\n\n"
-            "BullDust is a fun word-guessing game.\n"
-            "Challenge your vocabulary, think carefully "
-            "and climb the leaderboard!",
+        await query.message.reply_text(
+            "🧠 ABOUT BRAINBATTLE\n\n"
+            "BrainBattle is a fun word puzzle game "
+            "designed to challenge your vocabulary, "
+            "thinking and problem-solving skills.\n\n"
+            "Think fast. Play smart. Become a champion!",
+            reply_markup=main_menu()
+        )
+
+    elif query.data == "score":
+        score = scores.get(user_id, 0)
+
+        await query.message.reply_text(
+            f"👤 PLAYER PROFILE\n\n"
+            f"Name: {query.from_user.first_name}\n"
+            f"Total points: {score}\n\n"
+            "Keep playing to improve your score!",
             reply_markup=main_menu()
         )
 
     elif query.data == "leaderboard":
-        if not scores:
-            text = "🏆 LEADERBOARD\n\nNo scores yet. Be the first to play!"
-        else:
-            ranking = sorted(
-                scores.items(),
-                key=lambda item: item[1]["points"],
-                reverse=True
-            )[:10]
-
-            text = "🏆 LEADERBOARD\n\n"
-            for position, (player_id, data) in enumerate(ranking, 1):
-                text += f"{position}. {data['name']} — {data['points']} points\n"
-
-        await query.edit_message_text(
-            text,
-            reply_markup=main_menu()
-        )
+        await show_leaderboard(query.message)
 
 
 async def guess(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    game = context.user_data.get("game")
+    user_id = update.effective_user.id
+    word = update.message.text.upper().strip()
 
-    if not game:
+    if user_id not in games:
         await update.message.reply_text(
-            "Start a new challenge by tapping Play Game.",
-            reply_markup=main_menu()
+            "You don't have an active game.\n"
+            "Press /start to open the main menu."
         )
         return
 
-    word = game["word"]
-    guess_word = update.message.text.strip().upper()
-
-    if len(guess_word) != 3 or not guess_word.isalpha():
+    if len(word) != 5 or not word.isalpha():
         await update.message.reply_text(
-            "Please enter a valid THREE-LETTER word."
+            "⚠️ Enter exactly five letters."
         )
         return
 
+    game = games[user_id]
+    answer = game["word"]
     game["attempts"] += 1
 
-    remaining = Counter(word)
-    result = ["⬜"] * 3
+    result = ""
 
-    for i in range(3):
-        if guess_word[i] == word[i]:
-            result[i] = "🟩"
-            remaining[guess_word[i]] -= 1
+    for i, letter in enumerate(word):
+        if letter == answer[i]:
+            result += "🟩"
+        elif letter in answer:
+            result += "🟨"
+        else:
+            result += "⬛"
 
-    for i in range(3):
-        if result[i] != "🟩" and remaining[guess_word[i]] > 0:
-            result[i] = "🟨"
-            remaining[guess_word[i]] -= 1
-
-    feedback = " ".join(result)
-
-    if guess_word == word:
-        user_id = update.effective_user.id
-        name = update.effective_user.first_name
-
-        if user_id not in scores:
-            scores[user_id] = {"name": name, "points": 0}
-
-        scores[user_id]["name"] = name
-        scores[user_id]["points"] += 10
-
-        context.user_data["game"] = None
+    if word == answer:
+        scores[user_id] = scores.get(user_id, 0) + 10
+        del games[user_id]
 
         await update.message.reply_text(
-            f"🎉 BRILLIANT! You got it!\n\n"
-            f"The word was {word}.\n"
-            f"You earned 10 points!\n\n"
-            f"Your total score: {scores[user_id]['points']}",
+            f"🎉 BRILLIANT! YOU WON!\n\n"
+            f"The mystery word was {answer}.\n"
+            f"🏆 You earned 10 points!\n"
+            f"⭐ Total points: {scores[user_id]}",
             reply_markup=main_menu()
         )
+        return
 
-    elif game["attempts"] >= 6:
-        context.user_data["game"] = None
+    if game["attempts"] >= 10:
+        del games[user_id]
 
         await update.message.reply_text(
-            f"😢 Game Over!\n\n"
-            f"The correct word was {word}.\n"
-            f"Better luck next time!",
+            f"😅 GAME OVER!\n\n"
+            f"The mystery word was {answer}.\n"
+            "Better luck next time!",
             reply_markup=main_menu()
         )
+        return
 
-    else:
-        attempts_left = 6 - game["attempts"]
+    await update.message.reply_text(
+        f"{result}\n\n"
+        f"Attempt {game['attempts']} of 10.\n"
+        "Try another word!"
+    )
 
-        await update.message.reply_text(
-            f"{feedback}\n\n"
-            f"Attempts left: {attempts_left}\n"
-            f"Try again!"
-        )
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "Use /start to open BrainBattle and explore the menu."
+    )
 
 
 def main():
-    if not BOT_TOKEN:
-        raise ValueError("BOT_TOKEN environment variable is missing!")
-
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    app = ApplicationBuilder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("leaderboard", leaderboard_command))
+
     app.add_handler(CallbackQueryHandler(buttons))
+
     app.add_handler(
         MessageHandler(filters.TEXT & ~filters.COMMAND, guess)
     )
 
-    print("BullDust is running!")
+    print("BrainBattle is running!")
 
     app.run_polling()
 
